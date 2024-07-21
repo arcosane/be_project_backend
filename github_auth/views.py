@@ -5,6 +5,8 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.contrib.auth import login
 from django.contrib.auth.models import User
+from django.utils.dateparse import parse_datetime
+from django.utils.timezone import is_aware, make_aware
 import requests
 
 class GitHubLoginView(APIView):
@@ -59,11 +61,23 @@ class GitHubReposView(APIView):
 
         response = requests.get(
             'https://api.github.com/user/repos',
-            headers={'Authorization': f'token {github_token}'}
+            headers={'Authorization': f'token {github_token}'},
+            params={'sort': 'updated', 'direction': 'desc'}  # This sorts repos by last updated time
         )
         
         if response.status_code == 200:
             repos = response.json()
-            return Response(repos)
+            
+            # Convert string dates to datetime objects
+            for repo in repos:
+                updated_at = parse_datetime(repo['updated_at'])
+                if not is_aware(updated_at):
+                    updated_at = make_aware(updated_at)
+                repo['updated_at'] = updated_at
+            
+            # Sort repos by updated_at (most recent first)
+            sorted_repos = sorted(repos, key=lambda x: x['updated_at'], reverse=True)
+            
+            return Response(sorted_repos)
         else:
             return Response({"error": "Failed to fetch repositories"}, status=response.status_code)
