@@ -22,10 +22,13 @@ class GitHubCallbackView(APIView):
         
         # Create or get the user
         user, _ = User.objects.get_or_create(username=user_data['login'])
-        user.profile.github_token = access_token
-        user.profile.save()
+        profile = user.profile
+        profile.github_token = access_token
+        profile.github_email = user_data.get('email')
+        profile.github_avatar_url = user_data.get('avatar_url')
+        profile.save()
         
-        # Log the user in
+        # Log the user in and start a session
         login(request, user)
         
         return redirect(f'{settings.FRONTEND_URL}/home?username={user_data["login"]}')
