@@ -25,6 +25,7 @@ from django.views.decorators.csrf import csrf_exempt
 from .models import Chat, Message
 from django.utils.decorators import method_decorator
 import os
+import logging
 
 
 class GitHubLoginView(APIView):
@@ -153,12 +154,12 @@ class MessageView(LoginRequiredMixin, View):
 
         data = json.loads(request.body)
         
-        message = Message.objects.create(
+        user_message = Message.objects.create(
             chat=chat,
             sender='user',
             text=data.get('text', '')
         )
-        print(message.text, "=============================================")
+        print(type(user_message.text), "=============================================")
 
         # Here you would integrate with Mistral AI
         # For now, we'll just echo the message
@@ -166,27 +167,33 @@ class MessageView(LoginRequiredMixin, View):
         
         # Use Hugging Face InferenceClient to get the API response
         client = InferenceClient(api_key=CASHLATINO)
-        api_response = ""
 
-        for message in client.chat_completion(
+        # Assuming the response is structured as a list of messages
+        api_response = client.chat_completion(
             model="mistralai/Mistral-7B-Instruct-v0.3",
-            messages=[{"role": "user", "content": message.text}],
+            messages=[{"role": "user", "content": user_message.text}],
             max_tokens=500,
-            stream=True,
-        ):
-            api_response += message.choices[0].delta.content
-        bot_response = {api_response}
+        )
+
+        # Assuming the API returns a dictionary with a 'choices' key
+        if isinstance(api_response, dict) and 'choices' in api_response:
+            bot_message_text = api_response['choices'][0]['message']['content']
+        else:
+            # Handle unexpected response format
+            bot_message_text = str(api_response)
+
         bot_message = Message.objects.create(
             chat=chat,
             sender='bot',
-            text=bot_response
+            text=bot_message_text
         )
+
 
         return JsonResponse({
             'user_message': {
-                'sender': message.sender,
-                'text': message.text,
-                'timestamp': message.timestamp
+                'sender': user_message.sender,
+                'text': user_message.text,
+                'timestamp': user_message.timestamp
             },
             'bot_response': {
                 'sender': bot_message.sender,
@@ -199,26 +206,36 @@ class MessageView(LoginRequiredMixin, View):
         
         
 # LLM API View for generating responses and PDF
-method_decorator(csrf_exempt, name='dispatch')
+logger = logging.getLogger(__name__)
+
 class LLMResponseView(LoginRequiredMixin, View):
     def post(self, request):
-        data = json.loads(request.body)
-        question = data.get('question', '')
+        try:
+            data = json.loads(request.body)
+            logger.info(f"Received data: {data}")
+            question = data.get('question', '')
 
-        # Interact with Mistral model via Hugging Face's InferenceClient
-        client = InferenceClient(api_key="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")
-        api_response = ""
-        for message in client.chat_completion(
-            model="mistralai/Mistral-7B-Instruct-v0.3",
-            messages=[{"role": "user", "content": question}],
-            max_tokens=500,
-            stream=True,
-        ):
-            api_response += message.choices[0].delta.content
+            # Interact with Mistral model via Hugging Face's InferenceClient
+            client = InferenceClient(api_key="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")
+            api_response = ""
 
-        return JsonResponse({'api_response': api_response})
+            for message in client.chat_completion(
+                model="mistralai/Mistral-7B-Instruct-v0.3",
+                messages=[{"role": "user", "content": question}],
+                max_tokens=500,
+                stream=True,
+            ):
+                api_response += message.choices[0].delta.content
 
-# PDF Download View (class-based)
+            return JsonResponse({'api_response': api_response}, status=200)
+
+        except json.JSONDecodeError:
+            logger.error("Invalid JSON received")
+            return JsonResponse({"error": "Invalid JSON format"}, status=400)
+
+        except Exception as e:
+            logger.error(f"An error occurred: {str(e)}")
+            return JsonResponse({"error": "Internal Server Error"}, status=500)
 method_decorator(csrf_exempt, name='dispatch')
 class DownloadPDFView(LoginRequiredMixin, View):
     def post(self, request):
