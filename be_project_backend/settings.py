@@ -25,7 +25,7 @@ SECRET_KEY = 'django-insecure--1z7(nc5m(xmat8sm$kf!nt4$-kldnp*(mm3jrfq43y(jg8a#s
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['localhost']
 
 
 # Application definition
@@ -138,4 +138,5 @@ GITHUB_REDIRECT_URI = 'http://localhost:8000/api/github-callback/'
 FRONTEND_URL = 'http://localhost:3000'
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
+CSRF_TRUSTED_ORIGINS = ['http://localhost:3000']
 

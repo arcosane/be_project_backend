@@ -9,7 +9,14 @@ from django.utils.dateparse import parse_datetime
 from django.utils.timezone import is_aware, make_aware
 import requests
 from django.views import View
-
+from io import BytesIO
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import letter
+from django.http import HttpResponse
+from django.views.decorators.csrf import csrf_exempt
+from rest_framework.views import APIView
+from huggingface_hub import InferenceClient
+from django.conf import settings
 
 import json
 from django.contrib.auth.mixins import LoginRequiredMixin
@@ -17,6 +24,8 @@ from rest_framework.response import Response
 from django.views.decorators.csrf import csrf_exempt
 from .models import Chat, Message
 from django.utils.decorators import method_decorator
+import os
+
 
 class GitHubLoginView(APIView):
     def get(self, request):
@@ -143,15 +152,30 @@ class MessageView(LoginRequiredMixin, View):
             return JsonResponse({"error": "Chat not found"}, status=404)
 
         data = json.loads(request.body)
+        
         message = Message.objects.create(
             chat=chat,
             sender='user',
             text=data.get('text', '')
         )
+        print(message.text, "=============================================")
 
         # Here you would integrate with Mistral AI
         # For now, we'll just echo the message
-        bot_response = f"Echo: {message.text}"
+        
+        
+        # Use Hugging Face InferenceClient to get the API response
+        client = InferenceClient(api_key=CASHLATINO)
+        api_response = ""
+
+        for message in client.chat_completion(
+            model="mistralai/Mistral-7B-Instruct-v0.3",
+            messages=[{"role": "user", "content": message.text}],
+            max_tokens=500,
+            stream=True,
+        ):
+            api_response += message.choices[0].delta.content
+        bot_response = {api_response}
         bot_message = Message.objects.create(
             chat=chat,
             sender='bot',
@@ -170,3 +194,73 @@ class MessageView(LoginRequiredMixin, View):
                 'timestamp': bot_message.timestamp
             }
         })
+        
+        
+        
+        
+# LLM API View for generating responses and PDF
+method_decorator(csrf_exempt, name='dispatch')
+class LLMResponseView(LoginRequiredMixin, View):
+    def post(self, request):
+        data = json.loads(request.body)
+        question = data.get('question', '')
+
+        # Interact with Mistral model via Hugging Face's InferenceClient
+        client = InferenceClient(api_key="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")
+        api_response = ""
+        for message in client.chat_completion(
+            model="mistralai/Mistral-7B-Instruct-v0.3",
+            messages=[{"role": "user", "content": question}],
+            max_tokens=500,
+            stream=True,
+        ):
+            api_response += message.choices[0].delta.content
+
+        return JsonResponse({'api_response': api_response})
+
+# PDF Download View (class-based)
+method_decorator(csrf_exempt, name='dispatch')
+class DownloadPDFView(LoginRequiredMixin, View):
+    def post(self, request):
+        data = json.loads(request.body)
+        api_response = data.get('api_response', '')
+
+        # Generate PDF
+        buffer = BytesIO()
+        p = canvas.Canvas(buffer, pagesize=letter)
+        width, height = letter
+
+        # Title
+        p.setFont("Helvetica-Bold", 16)
+        p.drawString(100, height - 50, "API Response:")
+
+        # Set normal font for the response text
+        p.setFont("Helvetica", 12)
+        text_y = height - 80
+
+        def draw_wrapped_text(x, y, text, max_width):
+            words = text.split(' ')
+            line = ''
+            for word in words:
+                test_line = f"{line} {word}".strip()
+                text_width = p.stringWidth(test_line, "Helvetica", 12)
+
+                if text_width < max_width:
+                    line = test_line
+                else:
+                    p.drawString(x, y, line)
+                    y -= 14
+                    line = word
+
+            if line:
+                p.drawString(x, y, line)
+
+        draw_wrapped_text(100, text_y, api_response, 450)
+
+        # Save the PDF to the buffer
+        p.showPage()
+        p.save()
+
+        # Return PDF as HTTP response
+        buffer.seek(0)
+        return HttpResponse(buffer, content_type='application/pdf')
