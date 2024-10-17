@@ -287,3 +287,90 @@ class DownloadPDFView(LoginRequiredMixin, View):
 class ExtractFilesFromGithub(LoginRequiredMixin,View):
     def post(self,request):
         data = json.loads(request.body)
+
+
+
+#summaries the repo
+import base64
+
+@method_decorator(csrf_exempt, name='dispatch')
+class GitHubRepoSummarizerView(LoginRequiredMixin, View):
+    def post(self, request):
+        data = json.loads(request.body)
+        repo_name = data.get('repo_name')
+        
+        if not repo_name:
+            return JsonResponse({"error": "Repository name is required"}, status=400)
+
+        github_token = request.user.profile.github_token
+        if not github_token:
+            return JsonResponse({"error": "GitHub token not found"}, status=400)
+
+        # Fetch repository contents
+        repo_contents = self.fetch_repo_contents(request.user.username, repo_name, github_token)
+        
+        if isinstance(repo_contents, dict) and 'error' in repo_contents:
+            return JsonResponse(repo_contents, status=400)
+
+        # Prepare content for LLM
+        content_for_llm = self.prepare_content_for_llm(repo_contents)
+
+        # Generate summary using LLM
+        summary = self.generate_summary(content_for_llm)
+
+        return JsonResponse({"summary": summary})
+
+    def fetch_repo_contents(self, username, repo_name, token, path=''):
+        url = f'https://api.github.com/repos/{username}/{repo_name}/contents/{path}'
+        headers = {'Authorization': f'token {token}'}
+        response = requests.get(url, headers=headers)
+
+        if response.status_code != 200:
+            return {"error": "Failed to fetch repository contents"}
+
+        contents = response.json()
+        result = []
+
+        for item in contents:
+            if item['type'] == 'file':
+                file_content = self.fetch_file_content(item['download_url'], token)
+                result.append({
+                    'name': item['name'],
+                    'path': item['path'],
+                    'content': file_content
+                })
+            elif item['type'] == 'dir':
+                result.extend(self.fetch_repo_contents(username, repo_name, token, item['path']))
+
+        return result
+
+    def fetch_file_content(self, url, token):
+        headers = {'Authorization': f'token {token}'}
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            try:
+                # GitHub API returns the content directly, not base64 encoded
+                return response.text
+            except Exception as e:
+                print(f"Error decoding content: {str(e)}")
+                return "[Content could not be decoded]"
+        return ""
+
+    def prepare_content_for_llm(self, repo_contents):
+        content = "Repository structure and file contents:\n\n"
+        for item in repo_contents:
+            content += f"File: {item['path']}\n"
+            content += f"Content:\n{item['content'][:1000]}...\n\n"  # Limit content to 1000 characters per file
+        return content
+
+    def generate_summary(self, content):
+        client = InferenceClient(api_key="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")
+        prompt = f"Please provide a concise summary of the following GitHub repository contents:\n\n{content}\n\nSummary:"
+
+        response = client.text_generation(
+            model="mistralai/Mistral-7B-Instruct-v0.3",
+            prompt=prompt,
+            max_new_tokens=500,
+        )
+
+        return response
