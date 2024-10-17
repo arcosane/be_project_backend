@@ -166,7 +166,7 @@ class MessageView(LoginRequiredMixin, View):
         
         
         # Use Hugging Face InferenceClient to get the API response
-        client = InferenceClient(api_key="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")
+        client = InferenceClient(api_key=CASHLATINO)
 
         # Assuming the response is structured as a list of messages
         api_response = client.chat_completion(
@@ -281,3 +281,8 @@ class DownloadPDFView(LoginRequiredMixin, View):
         # Return PDF as HTTP response
         buffer.seek(0)
         return HttpResponse(buffer, content_type='application/pdf')
+    
+@method_decorator(csrf_exempt, name='dispatch')
+class ExtractFilesFromGithub(LoginRequiredMixin,View):
+    def post(self,request):
+        data = json.loads(request.body)
