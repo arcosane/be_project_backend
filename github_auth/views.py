@@ -298,9 +298,13 @@ class GitHubRepoSummarizerView(LoginRequiredMixin, View):
     def post(self, request):
         data = json.loads(request.body)
         repo_name = data.get('repo_name')
+        chat_id = data.get('chat_id')  # Add this line to get the chat_id from the request
         
         if not repo_name:
             return JsonResponse({"error": "Repository name is required"}, status=400)
+
+        if not chat_id:
+            return JsonResponse({"error": "Chat ID is required"}, status=400)
 
         github_token = request.user.profile.github_token
         if not github_token:
@@ -318,7 +322,23 @@ class GitHubRepoSummarizerView(LoginRequiredMixin, View):
         # Generate summary using LLM
         summary = self.generate_summary(content_for_llm)
 
-        return JsonResponse({"summary": summary})
+        # Save the summary as a new message
+        try:
+            chat = Chat.objects.get(id=chat_id, user=request.user)
+            message = Message.objects.create(
+                chat=chat,
+                sender='bot',
+                text=f"Summary of repository '{repo_name}':\n\n{summary}"
+            )
+        except Chat.DoesNotExist:
+            return JsonResponse({"error": "Chat not found"}, status=404)
+        except Exception as e:
+            return JsonResponse({"error": f"Failed to save message: {str(e)}"}, status=500)
+
+        return JsonResponse({
+            "summary": summary,
+            "message_id": message.id
+        })
 
     def fetch_repo_contents(self, username, repo_name, token, path=''):
         url = f'https://api.github.com/repos/{username}/{repo_name}/contents/{path}'
@@ -370,7 +390,7 @@ class GitHubRepoSummarizerView(LoginRequiredMixin, View):
         response = client.text_generation(
             model="mistralai/Mistral-7B-Instruct-v0.3",
             prompt=prompt,
-            max_new_tokens=500,
+            max_new_tokens=5000,
         )
 
         return response
