@@ -166,7 +166,7 @@ class MessageView(LoginRequiredMixin, View):
         
         
         # Use Hugging Face InferenceClient to get the API response
-        client = InferenceClient(api_key=CASHLATINO)
+        client = InferenceClient(api_key="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")
 
         # Assuming the response is structured as a list of messages
         api_response = client.chat_completion(
@@ -236,7 +236,7 @@ class LLMResponseView(LoginRequiredMixin, View):
         except Exception as e:
             logger.error(f"An error occurred: {str(e)}")
             return JsonResponse({"error": "Internal Server Error"}, status=500)
-method_decorator(csrf_exempt, name='dispatch')
+@method_decorator(csrf_exempt, name='dispatch')
 class DownloadPDFView(LoginRequiredMixin, View):
     def post(self, request):
         data = json.loads(request.body)
