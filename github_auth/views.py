@@ -208,6 +208,7 @@ class MessageView(LoginRequiredMixin, View):
 # LLM API View for generating responses and PDF
 logger = logging.getLogger(__name__)
 
+@method_decorator(csrf_exempt, name='dispatch')
 class LLMResponseView(LoginRequiredMixin, View):
     def post(self, request):
         try:
