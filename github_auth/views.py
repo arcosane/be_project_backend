@@ -166,7 +166,7 @@ class MessageView(LoginRequiredMixin, View):
         
         
         # Use Hugging Face InferenceClient to get the API response
-        client = InferenceClient(api_key=CASHLATINO)
+        client = InferenceClient(api_key="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")
 
         # Assuming the response is structured as a list of messages
         api_response = client.chat_completion(
