@@ -17,6 +17,7 @@ from django.views.decorators.csrf import csrf_exempt
 from rest_framework.views import APIView
 from huggingface_hub import InferenceClient
 from django.conf import settings
+from collections import Counter
 
 import json
 from django.contrib.auth.mixins import LoginRequiredMixin
@@ -394,3 +395,125 @@ class GitHubRepoSummarizerView(LoginRequiredMixin, View):
         )
 
         return response
+    
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
+
+@method_decorator(csrf_exempt, name='dispatch')
+class GitHubCodeAnalysisView(LoginRequiredMixin, APIView):
+    def post(self, request):
+        data = request.data  # Use request.data instead of reading request.body
+        repo_name = data.get('repo_name')
+        
+        if not repo_name:
+            return Response({"error": "Repository name is required"}, status=400)
+
+        github_token = request.user.profile.github_token
+        if not github_token:
+            return Response({"error": "GitHub token not found"}, status=400)
+
+        # Fetch repository contents
+        repo_contents = self.fetch_repo_contents(request.user.username, repo_name, github_token)
+        
+        if isinstance(repo_contents, dict) and 'error' in repo_contents:
+            return Response(repo_contents, status=400)
+
+        # Analyze code
+        analysis_result = self.analyze_code(repo_contents)
+
+        return Response(analysis_result)
+
+    def fetch_repo_contents(self, username, repo_name, token, path=''):
+        url = f'https://api.github.com/repos/{username}/{repo_name}/contents/{path}'
+        headers = {'Authorization': f'token {token}'}
+        response = requests.get(url, headers=headers)
+
+        if response.status_code != 200:
+            return {"error": "Failed to fetch repository contents"}
+
+        contents = response.json()
+        result = []
+
+        for item in contents:
+            if item['type'] == 'file':
+                file_content = self.fetch_file_content(item['download_url'], token)
+                result.append({
+                    'name': item['name'],
+                    'path': item['path'],
+                    'content': file_content
+                })
+            elif item['type'] == 'dir':
+                result.extend(self.fetch_repo_contents(username, repo_name, token, item['path']))
+
+        return result
+
+    def fetch_file_content(self, url, token):
+        headers = {'Authorization': f'token {token}'}
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            return response.text
+        return ""
+
+    def analyze_code(self, repo_contents):
+        language_stats = self.get_language_stats(repo_contents)
+        file_summaries = self.get_file_summaries(repo_contents)
+        improvement_suggestions = self.get_improvement_suggestions(repo_contents)
+
+        return {
+            'language_stats': language_stats,
+            'file_summaries': file_summaries,
+            'improvement_suggestions': improvement_suggestions
+        }
+
+    def get_language_stats(self, repo_contents):
+        language_extensions = {
+            'py': 'Python',
+            'js': 'JavaScript',
+            'html': 'HTML',
+            'css': 'CSS',
+            'json': 'JSON',
+            'md': 'Markdown'
+        }
+        
+        language_counts = Counter()
+        
+        for file in repo_contents:
+            ext = file['name'].split('.')[-1].lower()
+            language = language_extensions.get(ext, 'Other')
+            language_counts[language] += len(file['content'])
+        
+        total_bytes = sum(language_counts.values())
+        language_percentages = {lang: count / total_bytes * 100 for lang, count in language_counts.items()}
+        
+        return language_percentages
+
+    def get_file_summaries(self, repo_contents):
+        client = InferenceClient(api_key="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")
+        summaries = {}
+
+        for file in repo_contents:
+            prompt = f"Summarize the purpose and main functionality of this {file['name']} file:\n\n{file['content'][:1000]}..."
+            response = client.text_generation(
+                model="mistralai/Mistral-7B-Instruct-v0.3",
+                prompt=prompt,
+                max_new_tokens=100
+            )
+            summaries[file['path']] = response
+
+        return summaries
+
+    def get_improvement_suggestions(self, repo_contents):
+        client = InferenceClient(api_key="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")
+        suggestions = {}
+
+        for file in repo_contents:
+            prompt = f"Analyze this {file['name']} file and suggest improvements:\n\n{file['content'][:1000]}..."
+            response = client.text_generation(
+                model="mistralai/Mistral-7B-Instruct-v0.3",
+                prompt=prompt,
+                max_new_tokens=200
+            )
+            suggestions[file['path']] = response
+
+        return suggestions
+
