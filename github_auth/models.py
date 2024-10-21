@@ -36,3 +36,21 @@ class Message(models.Model):
 
     def __str__(self):
         return f"{self.sender}: {self.text[:50]}"
+    
+class GenChat(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    chat_name = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.user.username} - {self.chat_name}"
+
+class GenMessage(models.Model):
+    chat = models.ForeignKey(GenChat, related_name='messages', on_delete=models.CASCADE)
+    sender = models.CharField(max_length=10)  # 'user' or 'bot'
+    text = models.TextField()
+    timestamp = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.sender}: {self.text[:50]}"

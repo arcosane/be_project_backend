@@ -23,7 +23,7 @@ import json
 from django.contrib.auth.mixins import LoginRequiredMixin
 from rest_framework.response import Response
 from django.views.decorators.csrf import csrf_exempt
-from .models import Chat, Message
+from .models import Chat, Message, GenChat, GenMessage
 from django.utils.decorators import method_decorator
 import os
 import logging
@@ -517,3 +517,85 @@ class GitHubCodeAnalysisView(LoginRequiredMixin, APIView):
 
         return suggestions
 
+@method_decorator(csrf_exempt, name='dispatch')
+class CodeGenMessageView(LoginRequiredMixin, View):
+    def get(self, request, chat_id):
+        try:
+            chat = GenChat.objects.get(id=chat_id, user=request.user)
+        except GenChat.DoesNotExist:
+            return JsonResponse({"error": "Chat not found"}, status=404)
+
+        messages = GenMessage.objects.filter(chat=chat).values('sender', 'text', 'timestamp')
+        return JsonResponse(list(messages), safe=False)
+
+    def post(self, request, chat_id):
+        try:
+            chat = GenChat.objects.get(id=chat_id, user=request.user)
+        except GenChat.DoesNotExist:
+            return JsonResponse({"error": "Chat not found"}, status=404)
+
+        data = json.loads(request.body)
+        
+        user_message = GenMessage.objects.create(
+            chat=chat,
+            sender='user',
+            text=data.get('text', '')
+        )
+        print(type(user_message.text), "=============================================")
+
+        # Here you would integrate with Mistral AI
+        # For now, we'll just echo the message
+        
+        
+        # Use Hugging Face InferenceClient to get the API response
+        client = InferenceClient(api_key="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")
+
+        # Assuming the response is structured as a list of messages
+        api_response = client.chat_completion(
+            model="codellama/CodeLlama-34b-Instruct-hf",
+            messages=[{"role": "user", "content": user_message.text}],
+            max_tokens=1000,
+        )
+
+        # Assuming the API returns a dictionary with a 'choices' key
+        if isinstance(api_response, dict) and 'choices' in api_response:
+            bot_message_text = api_response['choices'][0]['message']['content']
+        else:
+            # Handle unexpected response format
+            bot_message_text = str(api_response)
+
+        bot_message = GenMessage.objects.create(
+            chat=chat,
+            sender='bot',
+            text=bot_message_text
+        )
+
+
+        return JsonResponse({
+            'user_message': {
+                'sender': user_message.sender,
+                'text': user_message.text,
+                'timestamp': user_message.timestamp
+            },
+            'bot_response': {
+                'sender': bot_message.sender,
+                'text': bot_message.text,
+                'timestamp': bot_message.timestamp
+            }
+        })
+        
+@method_decorator(csrf_exempt, name='dispatch')
+class GenChatView(LoginRequiredMixin, View):
+    def get(self, request):
+        chats = GenChat.objects.filter(user=request.user).values('id', 'chat_name', 'created_at')
+        return JsonResponse(list(chats), safe=False)
+
+    def post(self, request):
+        data = json.loads(request.body)
+        chat_name = data.get('chat_name', f"Chat {GenChat.objects.filter(user=request.user).count() + 1}")
+        chat = GenChat.objects.create(user=request.user, chat_name=chat_name)
+        return JsonResponse({
+            'id': chat.id,
+            'chat_name': chat.chat_name,
+            'created_at': chat.created_at
+        })
