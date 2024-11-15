@@ -18,7 +18,7 @@ from rest_framework.views import APIView
 from huggingface_hub import InferenceClient
 from django.conf import settings
 from collections import Counter
-
+import re
 import json
 from django.contrib.auth.mixins import LoginRequiredMixin
 from rest_framework.response import Response
@@ -154,7 +154,14 @@ class MessageView(LoginRequiredMixin, View):
             return JsonResponse({"error": "Chat not found"}, status=404)
 
         data = json.loads(request.body)
-        
+        messages = Message.objects.filter(chat=chat).order_by('timestamp').values('sender', 'text')
+        conversation_history = [
+            {
+                "role": "user" if msg['sender'] == 'user' else "bot",
+                "content": msg['text']
+            }
+            for msg in messages
+        ]
         user_message = Message.objects.create(
             chat=chat,
             sender='user',
@@ -162,18 +169,21 @@ class MessageView(LoginRequiredMixin, View):
         )
         print(type(user_message.text), "=============================================")
 
-        # Here you would integrate with Mistral AI
         # For now, we'll just echo the message
         
+        enhanced_prompt = f"""
+        conversation history: {conversation_history}
+        user's current prompt: {user_message.text}
+        """
         
         # Use Hugging Face InferenceClient to get the API response
         client = InferenceClient(api_key="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")
 
         # Assuming the response is structured as a list of messages
         api_response = client.chat_completion(
-            model="mistralai/Mistral-7B-Instruct-v0.3",
-            messages=[{"role": "user", "content": user_message.text}],
-            max_tokens=500,
+            model="meta-llama/Meta-Llama-3-8B-Instruct",
+            messages=[{"role": "user", "content": enhanced_prompt}],
+            max_tokens=1000,
         )
 
         # Assuming the API returns a dictionary with a 'choices' key
@@ -217,15 +227,13 @@ class LLMResponseView(LoginRequiredMixin, View):
             logger.info(f"Received data: {data}")
             question = data.get('question', '')
 
-            # Interact with Mistral model via Hugging Face's InferenceClient
             client = InferenceClient(api_key="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")
             api_response = ""
 
             for message in client.chat_completion(
-                model="mistralai/Mistral-7B-Instruct-v0.3",
+                model="meta-llama/Meta-Llama-3-8B-Instruct",
                 messages=[{"role": "user", "content": question}],
-                max_tokens=500,
-                stream=True,
+                max_tokens=1000,
             ):
                 api_response += message.choices[0].delta.content
 
@@ -243,7 +251,7 @@ class DownloadPDFView(LoginRequiredMixin, View):
     def post(self, request):
         data = json.loads(request.body)
         api_response = data.get('api_response', '')
-
+        print("=============\n",api_response)
         # Generate PDF
         buffer = BytesIO()
         p = canvas.Canvas(buffer, pagesize=letter)
@@ -283,7 +291,7 @@ class DownloadPDFView(LoginRequiredMixin, View):
         # Return PDF as HTTP response
         buffer.seek(0)
         return HttpResponse(buffer, content_type='application/pdf')
-    
+
 @method_decorator(csrf_exempt, name='dispatch')
 class ExtractFilesFromGithub(LoginRequiredMixin,View):
     def post(self,request):
@@ -385,16 +393,82 @@ class GitHubRepoSummarizerView(LoginRequiredMixin, View):
         return content
 
     def generate_summary(self, content):
+        
+        prompt = f"""
+        Use proper formatting and break down the information into sections with clear headings for easy readability.
+
+        You are an expert project report generator. Based on the topic provided by the user, generate a detailed project report. 
+        Ensure to include the following:
+
+        1. Introduction: Describe the overall project, its objectives, and technologies used.
+        2. Approach Used: Explain the methodology, architecture, and libraries used in the project.
+        3. Results: Briefly explain the outcomes of the project. Include a section where the user can add screenshots of results.
+        4. Conclusion: Summarize the findings and suggest improvements or next steps.
+        5. References: Include any relevant research papers or references used in the project.
+
+
+
+        Repository content:
+        {content}
+
+        """
+        print("===================================\n",content)
+        
         client = InferenceClient(api_key="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")
-        prompt = f"Please provide a concise summary of the following GitHub repository contents:\n\n{content}\n\nSummary:"
+        #prompt = f"Please provide a concise summary of the following GitHub repository contents:\n\n{content}\n\nSummary:"
 
-        response = client.text_generation(
-            model="mistralai/Mistral-7B-Instruct-v0.3",
-            prompt=prompt,
-            max_new_tokens=5000,
-        )
+        api_response = client.chat_completion(
+                model="meta-llama/Meta-Llama-3-8B-Instruct",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=1000
+                )
+        response = api_response['choices'][0]['message']['content'] if 'choices' in api_response else str(api_response)
+        formatted_report = self.format_report(response)
+        return formatted_report
+    
+    def format_report(self, report_text):
+        # 1. Split into sections based on bold headings
+        sections = re.split(r"(\*\*.*?\*\*)", report_text)
+        sections = [s.strip() for s in sections if s.strip()]
 
-        return response
+        formatted_report = ""
+
+        for i, section in enumerate(sections):
+            # 2. Identify and format headings
+            if section.startswith("**") and section.endswith("**"):
+                heading = section[2:-2].strip()
+                formatted_report += f"<h3>{heading}</h3>\n"
+            else:
+                # 3. Format the content
+                content = self.format_content(section)
+                formatted_report += f"<p>{content}</p>\n"
+
+        return formatted_report
+
+
+    def format_content(self, content):
+
+        # Handle ordered lists
+        content = re.sub(r"\n(\d+\.\s)", r"\n<ol><li>\1", content)
+        content = re.sub(r"(\d+\.)(.*?)(?=\n|$)", r"<li>\1\2</li>", content)
+        content = re.sub(r"</li>\n</ol>", r"</li></ol>", content)
+
+
+        # Handle unordered lists
+        content = re.sub(r"\n\* ", r"\n<ul><li>", content)
+        content = re.sub(r"\* (.*?)(?=\n|$)", r"<li>\1</li>", content)
+        content = re.sub(r"</li>\n</ul>", r"</li></ul>", content)
+
+        # Add line breaks between paragraphs
+        content = re.sub(r"\n\n", r"\n<br>\n", content)
+
+        #Handle edge cases:
+        if content.startswith("<li>"):
+            content = "<ul>" + content + "</ul>"
+
+        return content
+
+
     
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
@@ -492,11 +566,11 @@ class GitHubCodeAnalysisView(LoginRequiredMixin, APIView):
         summaries = {}
 
         for file in repo_contents:
-            prompt = f"Summarize the purpose and main functionality of this {file['name']} file:\n\n{file['content'][:1000]}..."
+            prompt = f"analyse and explain in  detail about these files technically. {file['name']} file:\n\n{file['content'][:1000]}..."
             response = client.text_generation(
-                model="mistralai/Mistral-7B-Instruct-v0.3",
+                model="meta-llama/Meta-Llama-3-8B-Instruct",
                 prompt=prompt,
-                max_new_tokens=100
+                max_new_tokens=300
             )
             summaries[file['path']] = response
 
@@ -507,16 +581,16 @@ class GitHubCodeAnalysisView(LoginRequiredMixin, APIView):
         suggestions = {}
 
         for file in repo_contents:
-            prompt = f"Analyze this {file['name']} file and suggest improvements:\n\n{file['content'][:1000]}..."
+            prompt = f"Analyze this {file['name']} file and suggest improvements and optimizations in short :\n\n{file['content'][:1000]}..."
             response = client.text_generation(
-                model="mistralai/Mistral-7B-Instruct-v0.3",
+                model="meta-llama/Meta-Llama-3-8B-Instruct",
                 prompt=prompt,
-                max_new_tokens=200
+                max_new_tokens=300
             )
             suggestions[file['path']] = response
 
         return suggestions
-
+import PyPDF2
 @method_decorator(csrf_exempt, name='dispatch')
 class CodeGenMessageView(LoginRequiredMixin, View):
     def get(self, request, chat_id):
@@ -528,22 +602,33 @@ class CodeGenMessageView(LoginRequiredMixin, View):
         messages = GenMessage.objects.filter(chat=chat).values('sender', 'text', 'timestamp')
         return JsonResponse(list(messages), safe=False)
 
+       
+
     def post(self, request, chat_id):
         try:
             chat = GenChat.objects.get(id=chat_id, user=request.user)
         except GenChat.DoesNotExist:
             return JsonResponse({"error": "Chat not found"}, status=404)
 
-        data = json.loads(request.body)
-
+        text_input = request.POST.get('text', '')
+        pdf_file = request.FILES.get('pdf')
+        pdf_text = ""
+        if pdf_file:
+            try:
+                pdf_reader = PyPDF2.PdfReader(pdf_file)
+                for page in range(len(pdf_reader.pages)):
+                    pdf_text += pdf_reader.pages[page].extract_text()
+            except PyPDF2.errors.PdfReadError:
+                return JsonResponse({"error": "Error reading PDF file"}, status=400)
+            except Exception as e:
+                return JsonResponse({"error": f"Unexpected error processing PDF: {e}"}, status=500)
         # Save the user's message
+        user_text = text_input +"\n"+ pdf_text
         user_message = GenMessage.objects.create(
             chat=chat,
             sender='user',
-            text=data.get('text', '')
+            text=user_text
         )
-        user_text = data.get('text', '')
-
         # Retrieve recent conversation history
         messages = GenMessage.objects.filter(chat=chat).order_by('timestamp').values('sender', 'text')
         conversation_history = [
@@ -557,13 +642,13 @@ class CodeGenMessageView(LoginRequiredMixin, View):
         # Enhanced prompt including memory
         enhanced_prompt = f"""
         You are a helpful assistant. Remember the context of the conversation and respond appropriately to the user's query.
-
+        
         For regular text explanations, write normally but ensure that if the text is too long, it is wrapped properly to fit within the div. Use `<div>` tags for the regular text. Break long sentences or paragraphs into smaller parts to fit properly.
 
         For the code part, wrap it with `<pre><code>` tags to preserve indentation and formatting. Ensure that the code does not overflow and fits within the width of the container.
 
         Conversation history: {conversation_history}
-
+        
         User's latest input:
         {user_text}
         """
@@ -574,7 +659,7 @@ class CodeGenMessageView(LoginRequiredMixin, View):
         try:
             # Get the model response
             api_response = client.chat_completion(
-                model="meta-llama/CodeLlama-70b-Instruct-hf",
+                model="meta-llama/Meta-Llama-3-8B-Instruct",
                 messages=[{"role": "user", "content": enhanced_prompt}],
                 max_tokens=1000,
             )
@@ -686,7 +771,7 @@ class RoadMapMessageView(LoginRequiredMixin, View):
         try:
             # Get the model response
             api_response = client.chat_completion(
-                model="mistralai/Mistral-7B-Instruct-v0.3",
+                model="meta-llama/Meta-Llama-3-8B-Instruct",
                 messages=[{"role": "user", "content": enhanced_prompt}],
                 max_tokens=1000,
             )
