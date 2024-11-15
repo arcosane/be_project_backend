@@ -1,6 +1,6 @@
 from django.urls import path
 from rest_framework.routers import DefaultRouter
-from .views import GitHubLoginView, GitHubCallbackView, GitHubReposView, RepoStructureView, ChatView, MessageView, DownloadPDFView, LLMResponseView, GitHubRepoSummarizerView, GitHubCodeAnalysisView, GenChatView, CodeGenMessageView
+from .views import GitHubLoginView, GitHubCallbackView, GitHubReposView, RepoStructureView, ChatView, MessageView, DownloadPDFView, LLMResponseView, GitHubRepoSummarizerView, GitHubCodeAnalysisView, GenChatView, CodeGenMessageView, RoadMapChatVIew, RoadMapMessageView
 
 urlpatterns = [
     
@@ -16,4 +16,6 @@ urlpatterns = [
     path('code-analysis/', GitHubCodeAnalysisView.as_view(), name='code_analysis'),
     path('code-gen-chats/', GenChatView.as_view(), name='chats'),
     path('code-gen-chats/<int:chat_id>/messages/', CodeGenMessageView.as_view(), name='messages'),
+    path('roadmap-chats/', RoadMapChatVIew.as_view(), name='chats'),
+    path('roadmap-chats/<int:chat_id>/messages/', RoadMapMessageView.as_view(), name='messages'),
 ]

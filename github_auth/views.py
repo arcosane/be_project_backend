@@ -23,7 +23,7 @@ import json
 from django.contrib.auth.mixins import LoginRequiredMixin
 from rest_framework.response import Response
 from django.views.decorators.csrf import csrf_exempt
-from .models import Chat, Message, GenChat, GenMessage
+from .models import Chat, Message, GenChat, GenMessage, RoadMapMessage, RoadMap
 from django.utils.decorators import method_decorator
 import os
 import logging
@@ -167,7 +167,7 @@ class MessageView(LoginRequiredMixin, View):
         
         
         # Use Hugging Face InferenceClient to get the API response
-        client = InferenceClient(api_key="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")
+        client = InferenceClient(api_key="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")
 
         # Assuming the response is structured as a list of messages
         api_response = client.chat_completion(
@@ -218,7 +218,7 @@ class LLMResponseView(LoginRequiredMixin, View):
             question = data.get('question', '')
 
             # Interact with Mistral model via Hugging Face's InferenceClient
-            client = InferenceClient(api_key="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")
+            client = InferenceClient(api_key="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")
             api_response = ""
 
             for message in client.chat_completion(
@@ -385,7 +385,7 @@ class GitHubRepoSummarizerView(LoginRequiredMixin, View):
         return content
 
     def generate_summary(self, content):
-        client = InferenceClient(api_key="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")
+        client = InferenceClient(api_key="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")
         prompt = f"Please provide a concise summary of the following GitHub repository contents:\n\n{content}\n\nSummary:"
 
         response = client.text_generation(
@@ -488,7 +488,7 @@ class GitHubCodeAnalysisView(LoginRequiredMixin, APIView):
         return language_percentages
 
     def get_file_summaries(self, repo_contents):
-        client = InferenceClient(api_key="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")
+        client = InferenceClient(api_key="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")
         summaries = {}
 
         for file in repo_contents:
@@ -503,7 +503,7 @@ class GitHubCodeAnalysisView(LoginRequiredMixin, APIView):
         return summaries
 
     def get_improvement_suggestions(self, repo_contents):
-        client = InferenceClient(api_key="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")
+        client = InferenceClient(api_key="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")
         suggestions = {}
 
         for file in repo_contents:
@@ -535,45 +535,57 @@ class CodeGenMessageView(LoginRequiredMixin, View):
             return JsonResponse({"error": "Chat not found"}, status=404)
 
         data = json.loads(request.body)
-        
+
+        # Save the user's message
         user_message = GenMessage.objects.create(
             chat=chat,
             sender='user',
             text=data.get('text', '')
         )
         user_text = data.get('text', '')
-        
-        # Enhanced prompt to make sure the response is in HTML format
+
+        # Retrieve recent conversation history
+        messages = GenMessage.objects.filter(chat=chat).order_by('timestamp').values('sender', 'text')
+        conversation_history = [
+            {
+                "role": "user" if msg['sender'] == 'user' else "bot",
+                "content": msg['text']
+            }
+            for msg in messages
+        ]
+
+        # Enhanced prompt including memory
         enhanced_prompt = f"""
-        For regular text explanations, write normally but ensure that if the text is too long, it is wrapped properly so that it fits within the div. You can use `<div>` tags for the regular text. Break long sentences or paragraphs into smaller parts to fit them properly within the div box.
+        You are a helpful assistant. Remember the context of the conversation and respond appropriately to the user's query.
+
+        For regular text explanations, write normally but ensure that if the text is too long, it is wrapped properly to fit within the div. Use `<div>` tags for the regular text. Break long sentences or paragraphs into smaller parts to fit properly.
 
         For the code part, wrap it with `<pre><code>` tags to preserve indentation and formatting. Ensure that the code does not overflow and fits within the width of the container.
 
-        Here's the user's question:
+        Conversation history: {conversation_history}
+
+        User's latest input:
         {user_text}
         """
 
-        
         # Use Hugging Face InferenceClient to get the API response
-        client = InferenceClient(api_key="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")
+        client = InferenceClient(api_key="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")
 
-        # Get the model response    
-        api_response = client.chat_completion(
-            model="codellama/CodeLlama-34b-Instruct-hf",
-            messages=[{"role": "user", "content": enhanced_prompt}],
-            max_tokens=1000,
-        )
-
-        # Assuming the response is structured as a list of messages
-        if isinstance(api_response, dict) and 'choices' in api_response:
-            bot_message_text = api_response['choices'][0]['message']['content']
-        else:
-            # Handle unexpected response format
-            bot_message_text = str(api_response)
+        try:
+            # Get the model response
+            api_response = client.chat_completion(
+                model="meta-llama/CodeLlama-70b-Instruct-hf",
+                messages=[{"role": "user", "content": enhanced_prompt}],
+                max_tokens=1000,
+            )
+            bot_message_text = api_response['choices'][0]['message']['content'] if 'choices' in api_response else str(api_response)
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
 
         # Wrap bot message code in <pre><code> tags to preserve formatting
         bot_message_text = f"<pre><code>{bot_message_text}</code></pre>"
 
+        # Save bot's response
         bot_message = GenMessage.objects.create(
             chat=chat,
             sender='bot',
@@ -592,6 +604,7 @@ class CodeGenMessageView(LoginRequiredMixin, View):
                 'timestamp': bot_message.timestamp
             }
         })
+
        
 @method_decorator(csrf_exempt, name='dispatch')
 class GenChatView(LoginRequiredMixin, View):
@@ -603,6 +616,116 @@ class GenChatView(LoginRequiredMixin, View):
         data = json.loads(request.body)
         chat_name = data.get('chat_name', f"Chat {GenChat.objects.filter(user=request.user).count() + 1}")
         chat = GenChat.objects.create(user=request.user, chat_name=chat_name)
+        return JsonResponse({
+            'id': chat.id,
+            'chat_name': chat.chat_name,
+            'created_at': chat.created_at
+        })
+        
+@method_decorator(csrf_exempt, name='dispatch')
+class RoadMapMessageView(LoginRequiredMixin, View):
+    def get(self, request, chat_id):
+        try:
+            chat = RoadMap.objects.get(id=chat_id, user=request.user)
+        except RoadMap.DoesNotExist:
+            return JsonResponse({"error": "Chat not found"}, status=404)
+
+        messages = RoadMapMessage.objects.filter(chat=chat).values('sender', 'text', 'timestamp')
+        return JsonResponse(list(messages), safe=False)
+
+    def post(self, request, chat_id):
+        try:
+            chat = RoadMap.objects.get(id=chat_id, user=request.user)
+        except RoadMap.DoesNotExist:
+            return JsonResponse({"error": "Chat not found"}, status=404)
+
+        data = json.loads(request.body)
+
+        # Save the user's message
+        user_message = RoadMapMessage.objects.create(
+            chat=chat,
+            sender='user',
+            text=data.get('text', '')
+        )
+        user_text = data.get('text', '')
+
+        # Retrieve recent conversation history
+        messages = RoadMapMessage.objects.filter(chat=chat).order_by('timestamp').values('sender', 'text')
+        conversation_history = [
+            {
+                "role": "user" if msg['sender'] == 'user' else "bot",
+                "content": msg['text']
+            }
+            for msg in messages
+        ]
+
+        # Enhanced prompt including memory
+        enhanced_prompt = f"""
+        You are an expert project roadmap generator. Based on the topic provided by the user, generate a detailed project roadmap. 
+        Ensure to include the following:
+
+        1. A list of **tasks to be done** to complete the project.
+        2. An **estimated timeline** for each task or the overall project.
+        3. A detailed **sequence and plan of action** to achieve the project goals.
+        4. A list of **references** as in research papers related to the project and additional support for the project.
+        5. A suggested **tech stack** suitable for this project.
+        6. The **features** to build for a successful project delivery.
+        7. Any other **helpful references or support** the user might need.
+
+        Use proper formatting and break down the information into sections with clear headings for easy readability. Keep the responses concise yet informative.
+
+        User's topic:
+        {user_text}
+        """
+
+        # Use Hugging Face InferenceClient to get the API response
+        client = InferenceClient(api_key="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")
+
+        try:
+            # Get the model response
+            api_response = client.chat_completion(
+                model="mistralai/Mistral-7B-Instruct-v0.3",
+                messages=[{"role": "user", "content": enhanced_prompt}],
+                max_tokens=1000,
+            )
+            bot_message_text = api_response['choices'][0]['message']['content'] if 'choices' in api_response else str(api_response)
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+
+        # Wrap bot message code in <pre><code> tags to preserve formatting
+        bot_message_text = f"<pre><code>{bot_message_text}</code></pre>"
+
+        # Save bot's response
+        bot_message = RoadMapMessage.objects.create(
+            chat=chat,
+            sender='bot',
+            text=bot_message_text
+        )
+
+        return JsonResponse({
+            'user_message': {
+                'sender': user_message.sender,
+                'text': user_message.text,
+                'timestamp': user_message.timestamp
+            },
+            'bot_response': {
+                'sender': bot_message.sender,
+                'text': bot_message.text,
+                'timestamp': bot_message.timestamp
+            }
+        })
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class RoadMapChatVIew(LoginRequiredMixin, View):
+    def get(self, request):
+        chats = RoadMap.objects.filter(user=request.user).values('id', 'chat_name', 'created_at')
+        return JsonResponse(list(chats), safe=False)
+
+    def post(self, request):
+        data = json.loads(request.body)
+        chat_name = data.get('chat_name', f"Chat {RoadMap.objects.filter(user=request.user).count() + 1}")
+        chat = RoadMap.objects.create(user=request.user, chat_name=chat_name)
         return JsonResponse({
             'id': chat.id,
             'chat_name': chat.chat_name,

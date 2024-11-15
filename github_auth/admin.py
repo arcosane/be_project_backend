@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Profile, Chat, Message, GenChat, GenMessage
+from .models import Profile, Chat, Message, GenChat, GenMessage, RoadMap, RoadMapMessage
 
 # Register the Profile model
 admin.site.register(Profile)
@@ -35,3 +35,17 @@ class GenMessageAdmin(admin.ModelAdmin):
     list_filter = ('timestamp',)
 
 admin.site.register(GenMessage, GenMessageAdmin)
+
+class RoadMapAdmin(admin.ModelAdmin):
+    list_display = ('user', 'chat_name', 'created_at', 'updated_at')
+    search_fields = ('chat_name', 'user__username')
+    list_filter = ('created_at', 'updated_at')
+
+admin.site.register(RoadMap, RoadMapAdmin)
+
+class RoadMapMessageAdmin(admin.ModelAdmin):
+    list_display = ('chat', 'sender', 'text', 'timestamp')
+    search_fields = ('sender', 'text')
+    list_filter = ('timestamp',)
+
+admin.site.register(RoadMapMessage, RoadMapMessageAdmin)
