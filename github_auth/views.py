@@ -674,6 +674,8 @@ class RoadMapMessageView(LoginRequiredMixin, View):
 
         Use proper formatting and break down the information into sections with clear headings for easy readability. Keep the responses concise yet informative.
 
+        Conversation history : {conversation_history}
+
         User's topic:
         {user_text}
         """
