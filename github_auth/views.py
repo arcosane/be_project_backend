@@ -541,35 +541,44 @@ class CodeGenMessageView(LoginRequiredMixin, View):
             sender='user',
             text=data.get('text', '')
         )
-        print(type(user_message.text), "=============================================")
-
-        # Here you would integrate with Mistral AI
-        # For now, we'll just echo the message
+        user_text = data.get('text', '')
         
+        # Enhanced prompt to make sure the response is in HTML format
+        enhanced_prompt = f"""
+        For regular text explanations, write normally but ensure that if the text is too long, it is wrapped properly so that it fits within the div. You can use `<div>` tags for the regular text. Break long sentences or paragraphs into smaller parts to fit them properly within the div box.
+
+        For the code part, wrap it with `<pre><code>` tags to preserve indentation and formatting. Ensure that the code does not overflow and fits within the width of the container.
+
+        Here's the user's question:
+        {user_text}
+        """
+
         
         # Use Hugging Face InferenceClient to get the API response
         client = InferenceClient(api_key="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")
 
-        # Assuming the response is structured as a list of messages
+        # Get the model response    
         api_response = client.chat_completion(
             model="codellama/CodeLlama-34b-Instruct-hf",
-            messages=[{"role": "user", "content": user_message.text}],
+            messages=[{"role": "user", "content": enhanced_prompt}],
             max_tokens=1000,
         )
 
-        # Assuming the API returns a dictionary with a 'choices' key
+        # Assuming the response is structured as a list of messages
         if isinstance(api_response, dict) and 'choices' in api_response:
             bot_message_text = api_response['choices'][0]['message']['content']
         else:
             # Handle unexpected response format
             bot_message_text = str(api_response)
 
+        # Wrap bot message code in <pre><code> tags to preserve formatting
+        bot_message_text = f"<pre><code>{bot_message_text}</code></pre>"
+
         bot_message = GenMessage.objects.create(
             chat=chat,
             sender='bot',
             text=bot_message_text
         )
-
 
         return JsonResponse({
             'user_message': {
@@ -583,7 +592,7 @@ class CodeGenMessageView(LoginRequiredMixin, View):
                 'timestamp': bot_message.timestamp
             }
         })
-        
+       
 @method_decorator(csrf_exempt, name='dispatch')
 class GenChatView(LoginRequiredMixin, View):
     def get(self, request):
