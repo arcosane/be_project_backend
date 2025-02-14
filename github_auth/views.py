@@ -27,6 +27,12 @@ from .models import Chat, Message, GenChat, GenMessage, RoadMapMessage, RoadMap
 from django.utils.decorators import method_decorator
 import os
 import logging
+from reportlab.platypus import BaseDocTemplate, Paragraph, Spacer, Frame, PageTemplate, SimpleDocTemplate
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.units import inch
+from reportlab.lib.pagesizes import letter
+
+from io import BytesIO
 
 
 class GitHubLoginView(APIView):
@@ -251,46 +257,64 @@ class DownloadPDFView(LoginRequiredMixin, View):
     def post(self, request):
         data = json.loads(request.body)
         api_response = data.get('api_response', '')
-        print("=============\n",api_response)
-        # Generate PDF
+        api_response = api_response.replace("<br>", "<br/>")
+
         buffer = BytesIO()
-        p = canvas.Canvas(buffer, pagesize=letter)
-        width, height = letter
+        doc = BaseDocTemplate(buffer, pagesize=letter)
+        styles = getSampleStyleSheet()
+        title_style = styles['h1']
+        title_style.alignment = 1  # Center alignment
+        paragraph_style = styles['Normal']
+        paragraph_style.fontSize = 10
+        paragraph_style.leading = 12
+        paragraph_style.wordWrap = 'CJK'
+        paragraph_style.splitLongWords = True
 
-        # Title
-        p.setFont("Helvetica-Bold", 16)
-        p.drawString(100, height - 50, "API Response:")
+        # Define frames (columns)
+        frame_width = doc.width / 2 - 0.5 * inch  # Half the page width minus some margin
+        left_frame = Frame(doc.leftMargin, doc.bottomMargin, frame_width, doc.height,
+                         id='left_frame')
+        right_frame = Frame(doc.leftMargin + doc.width / 2 + 0.5 * inch, doc.bottomMargin, frame_width, doc.height,
+                          id='right_frame')
 
-        # Set normal font for the response text
-        p.setFont("Helvetica", 12)
-        text_y = height - 80
+        # Define page template
+        page_template = PageTemplate(id='two_column', frames=[left_frame, right_frame], onPage=self.add_header_footer)
+        doc.addPageTemplates([page_template])
 
-        def draw_wrapped_text(x, y, text, max_width):
-            words = text.split(' ')
-            line = ''
-            for word in words:
-                test_line = f"{line} {word}".strip()
-                text_width = p.stringWidth(test_line, "Helvetica", 12)
+        # Build story (content)
+        story = []
+        title = Paragraph("Report:", title_style)
+        story.append(title)
+        story.append(Spacer(1, 0.2 * inch))
 
-                if text_width < max_width:
-                    line = test_line
-                else:
-                    p.drawString(x, y, line)
-                    y -= 14
-                    line = word
+        # Split the content into sections based on headings
+        sections = re.split(r"(<h3>.*?</h3>)", api_response)
+        sections = [s.strip() for s in sections if s.strip()]
 
-            if line:
-                p.drawString(x, y, line)
+        for section in sections:
+            if section.startswith("<h3>"):
+                heading_text = section[4:-5]
+                heading_style = styles['h2']
+                heading = Paragraph(heading_text, heading_style)
+                story.append(heading)
+                story.append(Spacer(1, 0.1 * inch))
+            else:
+                content = Paragraph(section, paragraph_style)
+                story.append(content)
+                story.append(Spacer(1, 0.1 * inch))
 
-        draw_wrapped_text(100, text_y, api_response, 450)
+        # Build the PDF
+        doc.build(story)
 
-        # Save the PDF to the buffer
-        p.showPage()
-        p.save()
-
-        # Return PDF as HTTP response
         buffer.seek(0)
         return HttpResponse(buffer, content_type='application/pdf')
+
+    def add_header_footer(self, canvas, doc):
+        canvas.saveState()
+        canvas.setFont('Helvetica', 9)
+        canvas.drawString(inch, 0.75 * inch, "Page %d" % doc.page)
+        canvas.restoreState()
+
 
 @method_decorator(csrf_exempt, name='dispatch')
 class ExtractFilesFromGithub(LoginRequiredMixin,View):
@@ -397,21 +421,71 @@ class GitHubRepoSummarizerView(LoginRequiredMixin, View):
         prompt = f"""
         Use proper formatting and break down the information into sections with clear headings for easy readability.
 
-        You are an expert project report generator. Based on the topic provided by the user, generate a detailed project report. 
-        Ensure to include the following:
+You are an expert project report generator specializing in AI/ML and Data Science projects. Based on the topic provided by the user, generate a detailed project report. Ensure that if multiple models or approaches are used, you provide a comprehensive comparison of their performance and characteristics.
 
-        1. Introduction: Describe the overall project, its objectives, and technologies used.
-        2. Approach Used: Explain the methodology, architecture, and libraries used in the project.
-        3. Results: Briefly explain the outcomes of the project. Include a section where the user can add screenshots of results.
-        4. Conclusion: Summarize the findings and suggest improvements or next steps.
-        5. References: Include any relevant research papers or references used in the project.
+Ensure to include the following:
 
+1. Title: A concise and informative title that accurately reflects the project's focus.
 
+2. Abstract: A brief summary of the entire project (around 200-300 words). It should cover the problem being addressed, the data used, the models or approaches implemented, key results (including performance metrics), and main conclusions (including model comparisons).
 
-        Repository content:
-        {content}
+3. Keywords: A list of 4-6 relevant keywords that can help with indexing and searching for the paper. Include keywords related to the specific algorithms, models, and data used.
 
-        """
+4. Introduction:
+   * Background: Provide context for the project, explaining the problem being addressed and its significance in the AI/ML or Data Science domain.
+   * Motivation: Explain why this project is important or necessary. What gap does it fill, or what problem does it solve in the context of AI/ML or Data Science?
+   * Objectives: Clearly state the goals and objectives of the project. What specific AI/ML or Data Science tasks did you aim to achieve (e.g., classification, regression, clustering, etc.)?
+   * Scope: Define the boundaries of the project. What datasets, models, and techniques were included? What was explicitly excluded?
+
+5. Literature Review: (Critically) review existing research and publications relevant to the project, focusing on related AI/ML or Data Science approaches. This section should:
+   * Identify Key Related Works: Identify relevant research papers, surveys, and blog posts that discuss similar AI/ML or Data Science problems and solutions.
+   * Summarize the Findings of Those Works: Provide concise summaries of the approaches used in each related work, highlighting their strengths and weaknesses.
+   * Compare and Contrast Different Approaches: Compare and contrast different AI/ML or Data Science techniques used in the literature, focusing on their suitability for the problem at hand.
+   * Highlight the Limitations of Existing Work: Identify any limitations or drawbacks of existing AI/ML or Data Science solutions.
+   * Explain How Your Project Builds Upon or Differs from Previous Research: Clearly articulate how your project extends or improves upon existing AI/ML or Data Science approaches.
+
+6. Methodology: Describe in detail the AI/ML or Data Science approach used to conduct the project. This section should be reproducible.
+   * Data Description: Describe the dataset(s) used, including their size, features, and source. Explain any data cleaning or preprocessing steps performed.
+   * Model Selection: Justify the choice of models or approaches. If multiple models were used, explain the rationale behind each selection and how they relate to the problem.
+   * Feature Engineering: Describe any feature engineering steps performed, including the creation of new features and the selection of relevant features.
+   * Training and Evaluation: Explain the training process for each model, including hyperparameter tuning, cross-validation, and performance metrics.
+   * Different Approaches Used: Explain each approach used in detail; what different algorithms were used, and why were they selected.
+
+7. Results: Present the findings of the project in a clear and objective manner, focusing on the performance of different models or approaches.
+   * Quantitative Results: Present numerical data using tables, graphs, and charts. Include key performance metrics (e.g., accuracy, precision, recall, F1-score, AUC-ROC, RMSE, R-squared) for each model.
+   * Compare the Performance or the Results of These Models: Compare the performance of different models or approaches based on the chosen performance metrics. Highlight any statistically significant differences in performance.
+   * Qualitative Results: Describe any qualitative observations or insights gained from the project.
+   * Figures/Screenshots: Include relevant figures, screenshots, or diagrams to illustrate the results. Provide captions for all figures.
+
+8. Discussion: Interpret the results and discuss their implications, focusing on the strengths and weaknesses of different models or approaches.
+   * Interpretation of Results: Explain the meaning of the results in the context of the problem being addressed. Discuss the factors that contributed to the performance of each model.
+   * Comparison with Existing Work: Compare the performance of your models with the results reported in the literature. Discuss any similarities or differences in performance.
+   * Limitations: Acknowledge the limitations of your project, including potential sources of bias or error in the data or methodology.
+
+9. Conclusion: Summarize the key findings and contributions of the project, highlighting the relative performance of different models or approaches.
+   * Summary of Findings: Briefly restate the main results, including a summary of the performance of each model.
+   * Contributions: Clearly state the contributions of the project to the AI/ML or Data Science domain. What new insights did you gain about the problem or the models?
+   * Future Work: Suggest potential directions for future research or development, building upon the findings of your project. Consider improvements to the models, new datasets to explore, or alternative approaches to investigate.
+
+10. References: List all the research papers, books, websites, and other sources that were cited in the report. Use a consistent citation style (e.g., APA, MLA, Chicago).
+
+11. Appendix (Optional): Include any supplementary materials that are not essential to the main body of the report, such as detailed code listings, raw data, or additional figures.
+
+Formatting Guidelines:
+
+* Use clear and concise language.
+* Use proper grammar and spelling.
+* Follow a consistent formatting style throughout the report.
+* Use headings and subheadings to organize the content.
+* Provide captions for all figures and tables.
+* Cite all sources properly.
+* Use bullet points or numbered lists to present information in a clear and organized manner.
+* Maintain an objective and unbiased tone.
+* Be detailed and clear, provide a section about how to access and use the project, along with its features. If possible, provide instructions or links to a simple installation/execution
+
+Repository content:
+{content}"""
+        
         print("===================================\n",content)
         
         client = InferenceClient(api_key="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")
@@ -602,8 +676,6 @@ class CodeGenMessageView(LoginRequiredMixin, View):
         messages = GenMessage.objects.filter(chat=chat).values('sender', 'text', 'timestamp')
         return JsonResponse(list(messages), safe=False)
 
-       
-
     def post(self, request, chat_id):
         try:
             chat = GenChat.objects.get(id=chat_id, user=request.user)
@@ -622,13 +694,15 @@ class CodeGenMessageView(LoginRequiredMixin, View):
                 return JsonResponse({"error": "Error reading PDF file"}, status=400)
             except Exception as e:
                 return JsonResponse({"error": f"Unexpected error processing PDF: {e}"}, status=500)
+
         # Save the user's message
-        user_text = text_input +"\n"+ pdf_text
+        user_text = text_input + "\n" + pdf_text
         user_message = GenMessage.objects.create(
             chat=chat,
             sender='user',
             text=user_text
         )
+
         # Retrieve recent conversation history
         messages = GenMessage.objects.filter(chat=chat).order_by('timestamp').values('sender', 'text')
         conversation_history = [
@@ -641,17 +715,17 @@ class CodeGenMessageView(LoginRequiredMixin, View):
 
         # Enhanced prompt including memory
         enhanced_prompt = f"""
-        You are a helpful assistant. Remember the context of the conversation and respond appropriately to the user's query.
-        
-        For regular text explanations, write normally but ensure that if the text is too long, it is wrapped properly to fit within the div. Use `<div>` tags for the regular text. Break long sentences or paragraphs into smaller parts to fit properly.
+You are a highly skilled software engineer specializing in algorithm design and code optimization.
+Your task is to analyze a given project report and generate pseudocode that outlines the core logic and functionality of the described system.
+The pseudocode should be clear, concise, and easily understandable by another software engineer. Focus on representing the essential steps and decision points, omitting language-specific syntax.
 
-        For the code part, wrap it with `<pre><code>` tags to preserve indentation and formatting. Ensure that the code does not overflow and fits within the width of the container.
+Project Report:
+{user_text}
 
-        Conversation history: {conversation_history}
-        
-        User's latest input:
-        {user_text}
-        """
+Conversation history: {conversation_history}
+
+Generate pseudocode that implements this project.
+"""
 
         # Use Hugging Face InferenceClient to get the API response
         client = InferenceClient(api_key="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")
@@ -689,8 +763,7 @@ class CodeGenMessageView(LoginRequiredMixin, View):
                 'timestamp': bot_message.timestamp
             }
         })
-
-       
+      
 @method_decorator(csrf_exempt, name='dispatch')
 class GenChatView(LoginRequiredMixin, View):
     def get(self, request):
@@ -818,3 +891,116 @@ class RoadMapChatVIew(LoginRequiredMixin, View):
             'chat_name': chat.chat_name,
             'created_at': chat.created_at
         })
+        
+@method_decorator(csrf_exempt, name='dispatch')      
+def fused_repo_summary(request):
+    repo_name = request.data.get('repo_name')
+    if not repo_name:
+        return Response({"error": "Repository name is required"}, status=400)
+
+    # Fetch repository contents (reuse your existing logic)
+    github_token = request.user.profile.github_token
+    repo_contents = GitHubRepoSummarizerView().fetch_repo_contents(request.user.username, repo_name, github_token) # reusing your code for fetching repo content
+    if isinstance(repo_contents, dict) and 'error' in repo_contents:
+        return Response(repo_contents, status=400)
+
+    content = GitHubRepoSummarizerView().prepare_content_for_llm(repo_contents)
+
+    # LLM 1: The Professor
+    client = InferenceClient(api_key="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")
+    prompt_professor = f"""
+        You are a highly experienced computer science professor with expertise in software engineering.
+        Your task is to analyze the following GitHub repository and explain its purpose, functionality,
+        and key components in a way that is easy for another AI model to understand.
+        Focus on providing clear and concise information that will help the other AI model generate a detailed and elaborate summary.
+
+        Repository Content:
+        {content}
+
+        Explanation:
+        """
+
+    professor_explanation = client.chat_completion(
+        model="meta-llama/Meta-Llama-3-8B-Instruct", # Replace with your model choice
+        messages=[{"role": "user", "content": prompt_professor}],
+        max_tokens=1000
+    )['choices'][0]['message']['content']
+
+
+    # LLM 2: The Elaborator
+    prompt_elaborator = f"""
+        Use proper formatting and break down the information into sections with clear headings for easy readability.
+
+You are an expert project report generator specializing in AI/ML and Data Science projects. Based on the topic provided by the user, generate a detailed project report. Ensure that if multiple models or approaches are used, you provide a comprehensive comparison of their performance and characteristics.
+
+Ensure to include the following:
+
+1. Title: A concise and informative title that accurately reflects the project's focus.
+
+2. Abstract: A brief summary of the entire project (around 200-300 words). It should cover the problem being addressed, the data used, the models or approaches implemented, key results (including performance metrics), and main conclusions (including model comparisons).
+
+3. Keywords: A list of 4-6 relevant keywords that can help with indexing and searching for the paper. Include keywords related to the specific algorithms, models, and data used.
+
+4. Introduction:
+   * Background: Provide context for the project, explaining the problem being addressed and its significance in the AI/ML or Data Science domain.
+   * Motivation: Explain why this project is important or necessary. What gap does it fill, or what problem does it solve in the context of AI/ML or Data Science?
+   * Objectives: Clearly state the goals and objectives of the project. What specific AI/ML or Data Science tasks did you aim to achieve (e.g., classification, regression, clustering, etc.)?
+   * Scope: Define the boundaries of the project. What datasets, models, and techniques were included? What was explicitly excluded?
+
+5. Literature Review: (Critically) review existing research and publications relevant to the project, focusing on related AI/ML or Data Science approaches. This section should:
+   * Identify Key Related Works: Identify relevant research papers, surveys, and blog posts that discuss similar AI/ML or Data Science problems and solutions.
+   * Summarize the Findings of Those Works: Provide concise summaries of the approaches used in each related work, highlighting their strengths and weaknesses.
+   * Compare and Contrast Different Approaches: Compare and contrast different AI/ML or Data Science techniques used in the literature, focusing on their suitability for the problem at hand.
+   * Highlight the Limitations of Existing Work: Identify any limitations or drawbacks of existing AI/ML or Data Science solutions.
+   * Explain How Your Project Builds Upon or Differs from Previous Research: Clearly articulate how your project extends or improves upon existing AI/ML or Data Science approaches.
+
+6. Methodology: Describe in detail the AI/ML or Data Science approach used to conduct the project. This section should be reproducible.
+   * Data Description: Describe the dataset(s) used, including their size, features, and source. Explain any data cleaning or preprocessing steps performed.
+   * Model Selection: Justify the choice of models or approaches. If multiple models were used, explain the rationale behind each selection and how they relate to the problem.
+   * Feature Engineering: Describe any feature engineering steps performed, including the creation of new features and the selection of relevant features.
+   * Training and Evaluation: Explain the training process for each model, including hyperparameter tuning, cross-validation, and performance metrics.
+   * Different Approaches Used: Explain each approach used in detail; what different algorithms were used, and why were they selected.
+
+7. Results: Present the findings of the project in a clear and objective manner, focusing on the performance of different models or approaches.
+   * Quantitative Results: Present numerical data using tables, graphs, and charts. Include key performance metrics (e.g., accuracy, precision, recall, F1-score, AUC-ROC, RMSE, R-squared) for each model.
+   * Compare the Performance or the Results of These Models: Compare the performance of different models or approaches based on the chosen performance metrics. Highlight any statistically significant differences in performance.
+   * Qualitative Results: Describe any qualitative observations or insights gained from the project.
+   * Figures/Screenshots: Include relevant figures, screenshots, or diagrams to illustrate the results. Provide captions for all figures.
+
+8. Discussion: Interpret the results and discuss their implications, focusing on the strengths and weaknesses of different models or approaches.
+   * Interpretation of Results: Explain the meaning of the results in the context of the problem being addressed. Discuss the factors that contributed to the performance of each model.
+   * Comparison with Existing Work: Compare the performance of your models with the results reported in the literature. Discuss any similarities or differences in performance.
+   * Limitations: Acknowledge the limitations of your project, including potential sources of bias or error in the data or methodology.
+
+9. Conclusion: Summarize the key findings and contributions of the project, highlighting the relative performance of different models or approaches.
+   * Summary of Findings: Briefly restate the main results, including a summary of the performance of each model.
+   * Contributions: Clearly state the contributions of the project to the AI/ML or Data Science domain. What new insights did you gain about the problem or the models?
+   * Future Work: Suggest potential directions for future research or development, building upon the findings of your project. Consider improvements to the models, new datasets to explore, or alternative approaches to investigate.
+
+10. References: List all the research papers, books, websites, and other sources that were cited in the report. Use a consistent citation style (e.g., APA, MLA, Chicago).
+
+11. Appendix (Optional): Include any supplementary materials that are not essential to the main body of the report, such as detailed code listings, raw data, or additional figures.
+
+Formatting Guidelines:
+
+* Use clear and concise language.
+* Use proper grammar and spelling.
+* Follow a consistent formatting style throughout the report.
+* Use headings and subheadings to organize the content.
+* Provide captions for all figures and tables.
+* Cite all sources properly.
+* Use bullet points or numbered lists to present information in a clear and organized manner.
+* Maintain an objective and unbiased tone.
+* Be detailed and clear, provide a section about how to access and use the project, along with its features. If possible, provide instructions or links to a simple installation/execution
+
+Repository content:
+{professor_explanation}"""
+        
+    elaborated_summary = client.chat_completion(
+        model="mistralai/Mistral-7B-Instruct-v0.3", # Replace with your model choice
+        messages=[{"role": "user", "content": prompt_elaborator}],
+        max_tokens=1000
+    )['choices'][0]['message']['content']
+
+    return Response({"summary": elaborated_summary})
+
