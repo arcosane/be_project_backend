@@ -183,11 +183,11 @@ class MessageView(LoginRequiredMixin, View):
         """
         
         # Use Hugging Face InferenceClient to get the API response
-        client = InferenceClient(api_key="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")
+        client = InferenceClient(api_key="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")
 
         # Assuming the response is structured as a list of messages
         api_response = client.chat_completion(
-            model="meta-llama/Meta-Llama-3-8B-Instruct",
+            model="mistralai/Mistral-7B-Instruct-v0.3",
             messages=[{"role": "user", "content": enhanced_prompt}],
             max_tokens=1000,
         )
@@ -233,11 +233,11 @@ class LLMResponseView(LoginRequiredMixin, View):
             logger.info(f"Received data: {data}")
             question = data.get('question', '')
 
-            client = InferenceClient(api_key="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")
+            client = InferenceClient(api_key="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")
             api_response = ""
 
             for message in client.chat_completion(
-                model="meta-llama/Meta-Llama-3-8B-Instruct",
+                model="mistralai/Mistral-7B-Instruct-v0.3",
                 messages=[{"role": "user", "content": question}],
                 max_tokens=1000,
             ):
@@ -477,6 +477,7 @@ Formatting Guidelines:
 * Use proper grammar and spelling.
 * Follow a consistent formatting style throughout the report.
 * Use headings and subheadings to organize the content.
+* Make sure the headings like Title, Abstract, etc. are bold and larger font
 * Provide captions for all figures and tables.
 * Cite all sources properly.
 * Use bullet points or numbered lists to present information in a clear and organized manner.
@@ -488,13 +489,13 @@ Repository content:
         
         print("===================================\n",content)
         
-        client = InferenceClient(api_key="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")
+        client = InferenceClient(api_key="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")
         #prompt = f"Please provide a concise summary of the following GitHub repository contents:\n\n{content}\n\nSummary:"
 
         api_response = client.chat_completion(
-                model="meta-llama/Meta-Llama-3-8B-Instruct",
+                model="mistralai/Mistral-7B-Instruct-v0.3",
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=1000
+                max_tokens=2000
                 )
         response = api_response['choices'][0]['message']['content'] if 'choices' in api_response else str(api_response)
         formatted_report = self.format_report(response)
@@ -636,28 +637,28 @@ class GitHubCodeAnalysisView(LoginRequiredMixin, APIView):
         return language_percentages
 
     def get_file_summaries(self, repo_contents):
-        client = InferenceClient(api_key="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")
+        client = InferenceClient(api_key="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")
         summaries = {}
 
         for file in repo_contents:
-            prompt = f"analyse and explain in  detail about these files technically. {file['name']} file:\n\n{file['content'][:1000]}..."
+            prompt = f"You are a highly skilled software engineer. Analyze the following file in detail and provide a deep, line-by-line technical explanation. For each line or block, explain what it does, why it's written that way, and how it fits into the overall purpose of the file. Also mention any design patterns, potential improvements, or performance concerns. File name: {file['name']} Content: {file['content']}"
             response = client.text_generation(
-                model="meta-llama/Meta-Llama-3-8B-Instruct",
+                model="mistralai/Mistral-7B-Instruct-v0.3",
                 prompt=prompt,
-                max_new_tokens=300
+                max_new_tokens=1000
             )
             summaries[file['path']] = response
 
         return summaries
 
     def get_improvement_suggestions(self, repo_contents):
-        client = InferenceClient(api_key="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")
+        client = InferenceClient(api_key="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")
         suggestions = {}
 
         for file in repo_contents:
             prompt = f"Analyze this {file['name']} file and suggest improvements and optimizations in short :\n\n{file['content'][:1000]}..."
             response = client.text_generation(
-                model="meta-llama/Meta-Llama-3-8B-Instruct",
+                model="mistralai/Mistral-7B-Instruct-v0.3",
                 prompt=prompt,
                 max_new_tokens=300
             )
@@ -716,24 +717,24 @@ class CodeGenMessageView(LoginRequiredMixin, View):
         # Enhanced prompt including memory
         enhanced_prompt = f"""
 You are a highly skilled software engineer specializing in algorithm design and code optimization.
-Your task is to analyze a given project report and generate pseudocode that outlines the core logic and functionality of the described system.
-The pseudocode should be clear, concise, and easily understandable by another software engineer. Focus on representing the essential steps and decision points, omitting language-specific syntax.
+Your task is to analyze a given project report and generate code that outlines the core logic and functionality of the described system.
+The code should be clear, concise, and easily understandable by another software engineer. Focus on representing the essential steps and decision points, omitting language-specific syntax.
 
 Project Report:
 {user_text}
 
 Conversation history: {conversation_history}
 
-Generate pseudocode that implements this project.
+Generate code that implements this project.
 """
 
         # Use Hugging Face InferenceClient to get the API response
-        client = InferenceClient(api_key="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")
+        client = InferenceClient(api_key="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")
 
         try:
             # Get the model response
             api_response = client.chat_completion(
-                model="meta-llama/Meta-Llama-3-8B-Instruct",
+                model="mistralai/Mistral-7B-Instruct-v0.3",
                 messages=[{"role": "user", "content": enhanced_prompt}],
                 max_tokens=1000,
             )
@@ -839,12 +840,12 @@ class RoadMapMessageView(LoginRequiredMixin, View):
         """
 
         # Use Hugging Face InferenceClient to get the API response
-        client = InferenceClient(api_key="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")
+        client = InferenceClient(api_key="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")
 
         try:
             # Get the model response
             api_response = client.chat_completion(
-                model="meta-llama/Meta-Llama-3-8B-Instruct",
+                model="mistralai/Mistral-7B-Instruct-v0.3",
                 messages=[{"role": "user", "content": enhanced_prompt}],
                 max_tokens=1000,
             )
@@ -907,7 +908,7 @@ def fused_repo_summary(request):
     content = GitHubRepoSummarizerView().prepare_content_for_llm(repo_contents)
 
     # LLM 1: The Professor
-    client = InferenceClient(api_key="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")
+    client = InferenceClient(api_key="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")
     prompt_professor = f"""
         You are a highly experienced computer science professor with expertise in software engineering.
         Your task is to analyze the following GitHub repository and explain its purpose, functionality,
@@ -921,7 +922,7 @@ def fused_repo_summary(request):
         """
 
     professor_explanation = client.chat_completion(
-        model="meta-llama/Meta-Llama-3-8B-Instruct", # Replace with your model choice
+        model="mistralai/Mistral-7B-Instruct-v0.3", # Replace with your model choice
         messages=[{"role": "user", "content": prompt_professor}],
         max_tokens=1000
     )['choices'][0]['message']['content']
